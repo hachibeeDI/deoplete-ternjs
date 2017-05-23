@@ -1,0 +1,25 @@
+{
+  "name": "deoplete-ternjs",
+  "version": "1.0.0",
+  "description": "[deoplete.nvim](https://github.com/Shougo/deoplete.nvim) source for javascript.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/carlitux/deoplete-ternjs.git"
+  },
+  "author": "carlitux",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/carlitux/deoplete-ternjs/issues"
+  },
+  "homepage": "https://github.com/carlitux/deoplete-ternjs#readme",
+  "dependencies": {
+    "tern": "^0.21.0"
+  }
+}
