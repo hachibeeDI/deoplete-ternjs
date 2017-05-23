@@ -7,6 +7,8 @@ import sys
 import platform
 import subprocess
 import time
+from pathlib import PurePath
+
 
 from deoplete.source.base import Base
 from logging import getLogger
@@ -95,16 +97,21 @@ class Source(Base):
             self.port = int(open(portFile, 'r').read())
             return
 
-        if platform.system() == 'Darwin':
-            env = os.environ.copy()
-            env['PATH'] += ':/usr/local/bin'
+        env = os.environ.copy()
+        file_current = PurePath(__file__)
+        node_modules_bin = os.path.abspath(str(
+            file_current / '..' / '..' / '..' / '..' / 'node_modules' / '.bin'
+        ))
+        env['PATH'] += ':' + node_modules_bin
 
-        self.proc = subprocess.Popen(self._tern_command + ' ' + self._tern_arguments,
-                                     cwd=self._project_directory, env=env,
-                                     stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT,
-                                     shell=True)
+        self.proc = subprocess.Popen(
+            self._tern_command + ' ' + self._tern_arguments,
+            cwd=self._project_directory, env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            shell=True
+        )
         output = ""
 
         while True:
