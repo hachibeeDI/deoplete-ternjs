@@ -8,19 +8,11 @@ import platform
 import subprocess
 import time
 from pathlib import PurePath
-
+from logging import getLogger
+from urllib import request
+from urllib.error import HTTPError
 
 from deoplete.source.base import Base
-from logging import getLogger
-
-PY2 = int(sys.version[0]) == 2
-
-if PY2:
-    import urllib2 as request
-    from urllib2 import HTTPError
-else:  # Py3
-    from urllib import request
-    from urllib.error import HTTPError
 
 
 opener = request.build_opener(request.ProxyHandler({}))
@@ -143,9 +135,6 @@ class Source(Base):
         if not self._project_directory:
             directory = self.vim.eval("expand('%:p:h')")
 
-            if PY2:
-                directory = directory.decode(self.vim.eval('&encoding'))
-
             if not os.path.isdir(directory):
                 return ''
 
@@ -156,8 +145,6 @@ class Source(Base):
 
                     if not parent:
                         self._project_directory = self.vim.eval('getcwd()')
-                        if PY2:
-                            self._project_directory = self._project_directory.decode(self.vim.eval('&encoding'))
 
                         break
 
@@ -169,18 +156,12 @@ class Source(Base):
 
     def make_request(self, doc, silent):
         payload = json.dumps(doc)
-        if not PY2:
-            payload = payload.encode('utf-8')
         try:
             req = opener.open('http://' + self.localhost + ':' + str(self.port) + '/', payload, self._tern_timeout)
             result = req.read()
-            if not PY2:
-                result = result.decode('utf-8')
             return json.loads(result)
         except HTTPError as error:
             message = error.read()
-            if not PY2:
-                message = message.decode('utf-8')
             self.error(message)
             return None
 
@@ -255,9 +236,6 @@ class Source(Base):
 
     def relative_file(self):
         filename = self.vim.eval("expand('%:p')")
-        if PY2:
-            filename = filename.decode(self.vim.eval('&encoding'))
-
         return filename[len(self._project_directory) + 1:]
 
     def buffer_fragment(self):
