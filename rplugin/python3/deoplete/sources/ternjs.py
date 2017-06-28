@@ -79,6 +79,7 @@ class Source(Base):
             return
 
         if not self._tern_command:
+            self.error("tern command doesn't ready")
             return None
 
         if time.time() - self.last_failed < 30:
@@ -90,6 +91,7 @@ class Source(Base):
 
         # if no project directory just skip
         if (self._project_directory is None):
+            self.info("There's no project directory")
             return
 
         portFile = os.path.join(self._project_directory, '.tern-port')
@@ -117,7 +119,7 @@ class Source(Base):
         while True:
             line = self.proc.stdout.readline().decode('utf-8')
             if not line:
-                print('Failed to start server' + (output and ':\n' + output))
+                self.error('Failed to start server' + (output and ':\n' + output))
                 self.last_failed = time.time()
                 self._trying_to_start = False
                 return None
@@ -179,12 +181,12 @@ class Source(Base):
             message = error.read()
             if not PY2:
                 message = message.decode('utf-8')
-            if not silent:
-                logger.error(message)
+            self.error(message)
             return None
 
     def run_command(self, query, pos, fragments=True, silent=False):
         if self.port is None:
+            self.debug("server haven't started")
             self.start_server()
 
         if isinstance(query, str):
@@ -349,6 +351,8 @@ class Source(Base):
         return m.start() if m else -1
 
     def gather_candidates(self, context):
+        # return [{'word': k, 'kind': v} for (k, v) in ({'tern': 'test', 'dayo': 'yyyy'}).items()]
+
         self._file_changed = 'TextChanged' in context['event'] or \
             self._tern_last_length != len(self.vim.current.buffer)
         line = context['position'][1]
