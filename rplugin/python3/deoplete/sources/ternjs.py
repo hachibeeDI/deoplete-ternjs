@@ -120,7 +120,7 @@ class Source(Base):
             return None
 
         self._trying_to_start = True
-        self._search_tern_project_dir()
+        self._project_directory = self._search_tern_project_dir()
         env = None
 
         # if no project directory just skip
@@ -129,9 +129,13 @@ class Source(Base):
             return
 
         portFile = os.path.join(self._project_directory, '.tern-port')
+        # TODO: support --no-port-file option
         if os.path.isfile(portFile):
-            self.port = int(open(portFile, 'r').read())
-            return
+            with open(portFile, 'r') as f:
+                self.port = int(f.read())
+                # FIXME: do we really need return in here?
+                # logics around self.port looks weird it looks also using as flag for something
+                # return
 
         env = os.environ.copy()
         file_current = PurePath(__file__)
@@ -174,27 +178,21 @@ class Source(Base):
         self.proc = None
 
     def _search_tern_project_dir(self):
-        if not self._project_directory:
-            directory = self.vim.eval("expand('%:p:h')")
+        if self._project_directory:
+            return self._project_directory
 
-            if not os.path.isdir(directory):
-                return ''
+        directory = self.vim.eval("expand('%:p:h')")
+        while True:
+            parent = os.path.dirname(directory[:-1])
 
-            if directory:
-                self._project_directory = directory
-                while True:
-                    parent = os.path.dirname(directory[:-1])
+            if not parent:
+                return self.vim.eval('getcwd()')
+                break
 
-                    if not parent:
-                        self._project_directory = self.vim.eval('getcwd()')
+            if os.path.isfile(os.path.join(directory, '.tern-project')):
+                return directory
 
-                        break
-
-                    if os.path.isfile(os.path.join(directory, '.tern-project')):
-                        self._project_directory = directory
-                        break
-
-                    directory = parent
+            directory = parent
 
     def make_request(self, doc, silent):
         payload = json.dumps(doc)
@@ -207,47 +205,52 @@ class Source(Base):
             self.error(message)
             return None
 
-    def run_command(self, query, pos, fragments=True, silent=False):
+    def run_command(self, pos, fragments=True, silent=False):
         if self.port is None:
             self.debug("server haven't started")
             self.start_server()
 
-        if isinstance(query, str):
-            query = {'type': query}
-
-        doc = {'query': query, 'files': []}
-
         current_buffer = self.vim.current.buffer
         file_length = len(current_buffer)
 
+        files = []
         if not self._file_changed and self._tern_first_request:
             fname = self.relative_file()
         elif file_length > 250 and fragments:
             f = self.buffer_fragment()
-            doc['files'].append(f)
+
             pos = {'line': pos['line'] - f['offsetLines'], 'ch': pos['ch']}
             fname = '#0'
+            files = [f]
         else:
             self._tern_first_request = True
-            doc['files'].append({
+            files = [{
                 'type': 'full',
                 'name': self.relative_file(),
                 'text': full_buffer(current_buffer),
-            })
+            }]
             fname = '#0'
+
+        query = {
+            'type': 'completions',
+            'types': True,
+            'docs': True,
+            'lineCharPositions': True,
+            'omitObjectPrototype': False,
+            'sort': False,
+        }
+        doc = {'query': query, 'files': files}
 
         query['file'] = fname
         query['end'] = pos
-        query['lineCharPositions'] = True
-        query['omitObjectPrototype'] = False
-        query['sort'] = False
+
         data = None
         try:
             data = self.make_request(doc, silent)
             if data is None:
                 return None
-        except:
-            pass
+        except Exception as e:
+            self.error(e)
 
         if data is None:
             try:
@@ -259,11 +262,9 @@ class Source(Base):
 
                 if data is None:
                     return None
-            except:
-                pass
-            # except Exception as e:
-            #     if not silent:
-            #         raise e
+
+            except Exception as e:
+                self.error(e)
 
         return data
 
@@ -298,34 +299,28 @@ class Source(Base):
         }
 
     def completation(self, pos):
-        command = {
-            'type': 'completions',
-            'types': True,
-            'docs': True
-        }
+        data = self.run_command(pos)
+        if not data:
+            return []
 
-        data = self.run_command(command, pos)
         completions = []
+        for rec in data['completions']:
+            icon = completion_icon(rec.get('type'))
+            abbr = None
 
-        if data is not None:
+            if (icon == '(fn)'):
+                abbr = rec.get('type', '').replace('fn', rec['name'], 1)
+            else:
+                abbr = rec['name']
 
-            for rec in data['completions']:
-                icon = completion_icon(rec.get('type'))
-                abbr = None
-
-                if (icon == '(fn)'):
-                    abbr = rec.get('type', '').replace('fn', rec['name'], 1)
-                else:
-                    abbr = rec['name']
-
-                completions.append({
-                    'menu': '[ternjs] ',
-                    'kind': icon,
-                    'word': rec['name'],
-                    'abbr': abbr,
-                    'info': type_doc(rec),
-                    'dup': 1,
-                })
+            completions.append({
+                'menu': '[ternjs] ',
+                'kind': icon,
+                'word': rec['name'],
+                'abbr': abbr,
+                'info': type_doc(rec),
+                'dup': 1,
+            })
 
         return completions
 
