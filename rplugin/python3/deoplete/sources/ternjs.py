@@ -25,6 +25,48 @@ import_re = r'=?\s*require\(["\'"][\w\./-]*$|\s+from\s+["\'][\w\./-]*$'
 import_pattern = re.compile(import_re)
 
 
+def completion_icon(type):
+    _type = '(obj)'
+    if type is None or type == '?':
+        _type = '(?)'
+    elif type.startswith('fn('):
+        _type = '(fn)'
+    elif type.startswith('['):
+        _type = '(' + type + ')'
+    elif type == 'number':
+        _type = '(num)'
+    elif type == 'string':
+        _type = '(str)'
+    elif type == 'bool':
+        _type = '(bool)'
+
+    return _type
+
+
+def buffer_slice(buf, pos, end):
+    text = ''
+    while pos < len(buf):
+        text += buf[pos] + '\n'
+        pos += 1
+    return text
+
+
+def type_doc(rec):
+    tp = rec.get('type')
+    result = rec.get('doc', ' ')
+    if tp and tp != '?':
+        result = tp + '\n' + result
+    return result
+
+
+def full_buffer(current_buffer):
+    return buffer_slice(
+        current_buffer,
+        0,
+        len(current_buffer),
+    )
+
+
 class RequestError(Exception):
 
     def __init__(self, message):
@@ -175,7 +217,8 @@ class Source(Base):
 
         doc = {'query': query, 'files': []}
 
-        file_length = len(self.vim.current.buffer)
+        current_buffer = self.vim.current.buffer
+        file_length = len(current_buffer)
 
         if not self._file_changed and self._tern_first_request:
             fname = self.relative_file()
@@ -186,7 +229,11 @@ class Source(Base):
             fname = '#0'
         else:
             self._tern_first_request = True
-            doc['files'].append(self.full_buffer())
+            doc['files'].append({
+                'type': 'full',
+                'name': self.relative_file(),
+                'text': full_buffer(current_buffer),
+            })
             fname = '#0'
 
         query['file'] = fname
@@ -220,20 +267,6 @@ class Source(Base):
 
         return data
 
-    def full_buffer(self):
-        text = self.buffer_slice(self.vim.current.buffer, 0,
-                                 len(self.vim.current.buffer))
-        return {'type': 'full',
-                'name': self.relative_file(),
-                'text': text}
-
-    def buffer_slice(self, buf, pos, end):
-        text = ''
-        while pos < len(buf):
-            text += buf[pos] + '\n'
-            pos += 1
-        return text
-
     def relative_file(self):
         filename = self.vim.eval("expand('%:p')")
         return filename[len(self._project_directory) + 1:]
@@ -257,27 +290,12 @@ class Source(Base):
 
         end = min(len(buffer) - 1, line + 20)
 
-        return {'type': 'part',
-                'name': self.relative_file(),
-                'text': self.buffer_slice(buffer, start, end),
-                'offsetLines': start}
-
-    def completion_icon(self, type):
-        _type = '(obj)'
-        if type is None or type == '?':
-            _type = '(?)'
-        elif type.startswith('fn('):
-            _type = '(fn)'
-        elif type.startswith('['):
-            _type = '(' + type + ')'
-        elif type == 'number':
-            _type = '(num)'
-        elif type == 'string':
-            _type = '(str)'
-        elif type == 'bool':
-            _type = '(bool)'
-
-        return _type
+        return {
+            'type': 'part',
+            'name': self.relative_file(),
+            'text': buffer_slice(buffer, start, end),
+            'offsetLines': start,
+        }
 
     def completation(self, pos):
         command = {
@@ -292,7 +310,7 @@ class Source(Base):
         if data is not None:
 
             for rec in data['completions']:
-                icon = self.completion_icon(rec.get('type'))
+                icon = completion_icon(rec.get('type'))
                 abbr = None
 
                 if (icon == '(fn)'):
@@ -305,18 +323,11 @@ class Source(Base):
                     'kind': icon,
                     'word': rec['name'],
                     'abbr': abbr,
-                    'info': self.type_doc(rec),
+                    'info': type_doc(rec),
                     'dup': 1,
                 })
 
         return completions
-
-    def type_doc(self, rec):
-        tp = rec.get('type')
-        result = rec.get('doc', ' ')
-        if tp and tp != '?':
-            result = tp + '\n' + result
-        return result
 
     def get_complete_position(self, context):
         m = import_pattern.search(context['input'])
