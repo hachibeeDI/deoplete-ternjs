@@ -1,28 +1,32 @@
 # pylint: disable=E0401,C0111,R0903
 
-import os
 import re
-import json
 import sys
-import platform
-import subprocess
-import time
-from pathlib import PurePath
-from logging import getLogger
-from urllib import request
-from urllib.error import HTTPError
-
+from os import path
 from deoplete.source.base import Base
 
+# hack to import sub modules
+sys.path.insert(1, path.dirname(__file__))  # noqa: E261
+from deoplate_ternjs.worker import Worker
 
-opener = request.build_opener(request.ProxyHandler({}))
-current = __file__
-
-logger = getLogger(__name__)
-windows = platform.system() == "Windows"
 
 import_re = r'=?\s*require\(["\'"][\w\./-]*$|\s+from\s+["\'][\w\./-]*$'
 import_pattern = re.compile(import_re)
+
+
+def _search_tern_project_dir(current, cwd):
+    directory = current
+    while True:
+        parent = path.dirname(directory[:-1])
+
+        if not parent:
+            raise ValueError('There is no .tern-project')
+            # return cwd
+
+        if path.isfile(path.join(directory, '.tern-project')):
+            return directory
+
+        directory = parent
 
 
 def completion_icon(type):
@@ -43,28 +47,12 @@ def completion_icon(type):
     return _type
 
 
-def buffer_slice(buf, pos, end):
-    text = ''
-    while pos < len(buf):
-        text += buf[pos] + '\n'
-        pos += 1
-    return text
-
-
 def type_doc(rec):
     tp = rec.get('type')
     result = rec.get('doc', ' ')
     if tp and tp != '?':
         result = tp + '\n' + result
     return result
-
-
-def full_buffer(current_buffer):
-    return buffer_slice(
-        current_buffer,
-        0,
-        len(current_buffer),
-    )
 
 
 class RequestError(Exception):
@@ -89,217 +77,35 @@ class Source(Base):
         if 'tern#filetypes' in vim.vars:
             self.filetypes.extend(vim.vars['tern#filetypes'])
 
-        self._project_directory = None
-        self.port = None
-        self.localhost = (windows and '127.0.0.1') or 'localhost'
-        self.proc = None
         self.last_failed = 0
-        self._tern_command = \
-            self.vim.vars['deoplete#sources#ternjs#tern_bin'] or 'tern'
-        self._tern_arguments = '--persistent'
-        self._tern_timeout = 1
-        self._tern_first_request = False
+
         self._tern_last_length = 0
-        self._trying_to_start = False
-
-        if vim.eval('exists("g:tern_request_timeout")'):
-            self._tern_timeout = float(vim.eval('g:tern_request_timeout'))
-
-    def __del__(self):
-        self.stop_server()
-
-    def start_server(self):
-        if self._trying_to_start:
-            return
-
-        if not self._tern_command:
-            self.error("tern command doesn't ready")
-            return None
-
-        if time.time() - self.last_failed < 30:
-            return None
-
-        self._trying_to_start = True
-        self._project_directory = self._search_tern_project_dir()
-        env = None
-
-        # if no project directory just skip
-        if (self._project_directory is None):
-            self.info("There's no project directory")
-            return
-
-        portFile = os.path.join(self._project_directory, '.tern-port')
-        # TODO: support --no-port-file option
-        if os.path.isfile(portFile):
-            with open(portFile, 'r') as f:
-                self.port = int(f.read())
-                # FIXME: do we really need return in here?
-                # logics around self.port looks weird it looks also using as flag for something
-                # return
-
-        env = os.environ.copy()
-        file_current = PurePath(__file__)
-        node_modules_bin = os.path.abspath(str(
-            file_current / '..' / '..' / '..' / '..' / 'node_modules' / '.bin'
-        ))
-        env['PATH'] += ':' + node_modules_bin
-
-        self.proc = subprocess.Popen(
-            self._tern_command + ' ' + self._tern_arguments,
-            cwd=self._project_directory, env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            shell=True
+        self._project_directory = _search_tern_project_dir(
+            vim.eval("expand('%:p:h')"),
+            vim.eval('getcwd()')
         )
-        output = ""
-
-        while True:
-            line = self.proc.stdout.readline().decode('utf-8')
-            if not line:
-                self.error('Failed to start server' + (output and ':\n' + output))
-                self.last_failed = time.time()
-                self._trying_to_start = False
-                return None
-
-            match = re.match('Listening on port (\\d+)', line)
-            if match:
-                self.port = int(match.group(1))
-                return
-            else:
-                output += line
-
-    def stop_server(self):
-        if self.proc is None:
-            return
-
-        self.proc.stdin.close()
-        self.proc.wait()
-        self.proc = None
-
-    def _search_tern_project_dir(self):
-        if self._project_directory:
-            return self._project_directory
-
-        directory = self.vim.eval("expand('%:p:h')")
-        while True:
-            parent = os.path.dirname(directory[:-1])
-
-            if not parent:
-                return self.vim.eval('getcwd()')
-                break
-
-            if os.path.isfile(os.path.join(directory, '.tern-project')):
-                return directory
-
-            directory = parent
-
-    def make_request(self, doc, silent):
-        payload = json.dumps(doc)
-        try:
-            req = opener.open('http://' + self.localhost + ':' + str(self.port) + '/', payload, self._tern_timeout)
-            result = req.read()
-            return json.loads(result)
-        except HTTPError as error:
-            message = error.read()
-            self.error(message)
-            return None
-
-    def run_command(self, pos, fragments=True, silent=False):
-        if self.port is None:
-            self.debug("server haven't started")
-            self.start_server()
-
-        current_buffer = self.vim.current.buffer
-        file_length = len(current_buffer)
-
-        files = []
-        if not self._file_changed and self._tern_first_request:
-            fname = self.relative_file()
-        elif file_length > 250 and fragments:
-            f = self.buffer_fragment()
-
-            pos = {'line': pos['line'] - f['offsetLines'], 'ch': pos['ch']}
-            fname = '#0'
-            files = [f]
-        else:
-            self._tern_first_request = True
-            files = [{
-                'type': 'full',
-                'name': self.relative_file(),
-                'text': full_buffer(current_buffer),
-            }]
-            fname = '#0'
-
-        query = {
-            'type': 'completions',
-            'types': True,
-            'docs': True,
-            'lineCharPositions': True,
-            'omitObjectPrototype': False,
-            'sort': False,
-        }
-        doc = {'query': query, 'files': files}
-
-        query['file'] = fname
-        query['end'] = pos
-
-        data = None
-        try:
-            data = self.make_request(doc, silent)
-            if data is None:
-                return None
-        except Exception as e:
-            self.error(e)
-
-        if data is None:
-            try:
-                self.start_server()
-                if self.port is None:
-                    return
-
-                data = self.make_request(doc, silent)
-
-                if data is None:
-                    return None
-
-            except Exception as e:
-                self.error(e)
-
-        return data
+        tern_timeout = 1
+        if vim.eval('exists("g:tern_request_timeout")'):
+            tern_timeout = float(vim.eval('g:tern_request_timeout'))
+        self.__worker = Worker(
+            self._project_directory,
+            self.vim.vars['deoplete#sources#ternjs#tern_bin'] or 'tern',
+            logger=self,
+            tern_timeout=tern_timeout,
+        )
 
     def relative_file(self):
         filename = self.vim.eval("expand('%:p')")
         return filename[len(self._project_directory) + 1:]
 
-    def buffer_fragment(self):
-        line = self.vim.eval("line('.')") - 1
-        buffer = self.vim.current.buffer
-        min_indent = None
-        start = None
-
-        for i in range(max(0, line - 50), line):
-            if not re.match('.*\\bfunction\\b', buffer[i]):
-                continue
-            indent = len(re.match('^\\s*', buffer[i]).group(0))
-            if min_indent is None or indent <= min_indent:
-                min_indent = indent
-                start = i
-
-        if start is None:
-            start = max(0, line - 50)
-
-        end = min(len(buffer) - 1, line + 20)
-
-        return {
-            'type': 'part',
-            'name': self.relative_file(),
-            'text': buffer_slice(buffer, start, end),
-            'offsetLines': start,
-        }
-
-    def completation(self, pos):
-        data = self.run_command(pos)
+    def completation(self, pos, file_changed):
+        data = self.__worker.get_candidates(
+            self.vim.current.buffer,
+            pos,
+            self.vim.eval("line('.')") - 1,
+            file_changed,
+            self.relative_file(),
+        )
         if not data:
             return []
 
@@ -335,10 +141,6 @@ class Source(Base):
         return m.start() if m else -1
 
     def gather_candidates(self, context):
-        # return [{'word': k, 'kind': v} for (k, v) in ({'tern': 'test', 'dayo': 'yyyy'}).items()]
-
-        self._file_changed = 'TextChanged' in context['event'] or \
-            self._tern_last_length != len(self.vim.current.buffer)
         line = context['position'][1]
         col = context['complete_position']
         pos = {"line": line - 1, "ch": col}
@@ -350,8 +152,9 @@ class Source(Base):
         if m:
             pos['ch'] = m.end()
 
+        file_changed = 'TextChanged' in context['event'] or self._tern_last_length != len(self.vim.current.buffer)
         try:
-            result = self.completation(pos) or []
+            result = self.completation(pos, file_changed) or []
         except Exception as e:
             import traceback
             _, _, tb = sys.exc_info()
@@ -359,6 +162,6 @@ class Source(Base):
             extra = '{}:{}, in {}\n    {}'.format(filename, lineno, funname, line)
             self.vim.err_write('Ternjs Error: {}\n{}\n'.format(e, extra))
 
-            result = []
+            return []
 
         return result
