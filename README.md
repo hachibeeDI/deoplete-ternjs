@@ -13,7 +13,7 @@ Based on tern_for_vim and deoplete-jedi
   - https://github.com/Shougo/deoplete.nvim
 
 - ternjs
-  - http://ternjs.net/  - This needs to be installed globally
+  - http://ternjs.net/  - This will installed deoplete-ternjs directory
 
 ## Important!
 
@@ -33,14 +33,22 @@ allowing ternjs use the default setup.
 Using [NeoBundle](https://github.com/Shougo/neobundle.vim)
 
 ```vim
-NeoBundle 'carlitux/deoplete-ternjs', { 'build': { 'mac': 'npm install -g tern', 'unix': 'npm install -g tern' }}
+NeoBundle 'carlitux/deoplete-ternjs', { 'build': 'npm install' }
 ```
 
 or using [Plug](https://github.com/junegunn/vim-plug)
 
 ```vim
-Plug 'carlitux/deoplete-ternjs', { 'do': 'npm install -g tern' }
+Plug 'carlitux/deoplete-ternjs', { 'do': 'npm install' }
 ```
+
+or if you installed plugin manually
+
+```sh
+$ cd deoplete-ternjs/
+$ npm install
+```
+
 
 ## Ternjs Configuration
 
