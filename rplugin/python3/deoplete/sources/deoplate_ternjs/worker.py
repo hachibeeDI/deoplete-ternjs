@@ -6,6 +6,7 @@ from os import path, environ
 from pathlib import PurePath
 from urllib import request
 from urllib.error import HTTPError
+from typing import Any, Dict
 
 from deoplete.logger import LoggingMixin
 
@@ -123,7 +124,7 @@ class Worker(LoggingMixin):
         self.proc.wait()
         self.proc = None
 
-    def make_request(self, doc, silent):
+    def make_request(self, doc, silent) -> Dict[str, Any]:
         payload = json.dumps(doc).encode('utf-8')
         try:
             req = opener.open(
@@ -133,13 +134,13 @@ class Worker(LoggingMixin):
             )
             result = req.read()
             self.logger.debug(result)
-            return json.loads(result)
+            return json.loads(result.decode('utf-8'))
         except HTTPError as error:
             message = error.read()
             self.logger.error(message)
             raise
 
-    def get_candidates(self, current_buffer, pos, line, file_changed, filename_relative, silent=False):
+    def get_candidates(self, current_buffer, pos, line, file_changed, filename_relative, silent=False) -> Dict[str, Any]:
         if self.port is None:
             self.logger.debug("server haven't started")
             self.start_server()
