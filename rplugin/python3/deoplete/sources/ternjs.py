@@ -73,6 +73,7 @@ class Source(Base):
         self.mark = '[ternjs]'
         self.input_pattern = (r'\.\w*$|^\s*@\w*$|' + import_re)
         self.rank = 900
+        self.debug_enabled = False
         self.filetypes = ['javascript']
         if 'tern#filetypes' in vim.vars:
             self.filetypes.extend(vim.vars['tern#filetypes'])
@@ -84,9 +85,13 @@ class Source(Base):
             vim.eval("expand('%:p:h')"),
             vim.eval('getcwd()')
         )
+
+        self.__worker = None
+
+    def on_init(self, ctx):
         tern_timeout = 1
-        if vim.eval('exists("g:tern_request_timeout")'):
-            tern_timeout = float(vim.eval('g:tern_request_timeout'))
+        if self.vim.eval('exists("g:tern_request_timeout")'):
+            tern_timeout = float(self.vim.eval('g:tern_request_timeout'))
         self.__worker = Worker(
             self._project_directory,
             self.vim.vars['deoplete#sources#ternjs#tern_bin'] or 'tern',
