@@ -99,6 +99,10 @@ class Source(Base):
             tern_timeout=tern_timeout,
         )
 
+    def on_event(self, context):
+        if context['event'] == 'VimLeavePre':
+            self.__worker.stop_server()
+
     def relative_file(self):
         filename = self.vim.eval("expand('%:p')")
         return filename[len(self._project_directory) + 1:]

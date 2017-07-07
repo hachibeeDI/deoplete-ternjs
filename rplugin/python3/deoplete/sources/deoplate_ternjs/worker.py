@@ -205,7 +205,3 @@ class Worker(LoggingMixin):
             'text': buffer_slice(current_buffer, start, end),
             'offsetLines': start,
         }
-
-
-    def __del__(self):
-        self.stop_server()
