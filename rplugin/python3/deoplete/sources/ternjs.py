@@ -72,17 +72,26 @@ class Source(Base):
         self.last_failed = 0
 
         self._tern_last_length = 0
-        self._project_directory = _search_tern_project_dir(
-            vim.eval("expand('%:p:h')"),
-            vim.eval('getcwd()')
-        )
+
+        self._disabled = False
+        try:
+            self._project_directory = _search_tern_project_dir(
+                vim.eval("expand('%:p:h')"),
+                vim.eval('getcwd()')
+            )
+        except Exception:
+            self._disabled = True
 
         self.__worker = None
 
     def on_init(self, ctx):
+        if self._disabled:
+            return
+
         tern_timeout = 1
         if self.vim.eval('exists("g:tern_request_timeout")'):
             tern_timeout = float(self.vim.eval('g:tern_request_timeout'))
+
         self.__worker = Worker(
             self._project_directory,
             self.vim.vars['deoplete#sources#ternjs#tern_bin'] or 'tern',
@@ -91,6 +100,9 @@ class Source(Base):
         )
 
     def on_event(self, context):
+        if self._disabled:
+            return
+
         if context['event'] == 'VimLeavePre':
             self.__worker.stop_server()
 
@@ -99,6 +111,9 @@ class Source(Base):
         return filename[len(self._project_directory) + 1:]
 
     def completation(self, pos, file_changed):
+        if self._disabled:
+            return
+
         data = self.__worker.get_candidates(
             self.vim.current.buffer,
             pos,
